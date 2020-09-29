@@ -1,0 +1,98 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ SERVICE }}
+  namespace: {{ ENVIRONMENT }}
+data:
+  SERVICE: {{ SERVICE }}
+  ENVIRONMENT: {{ ENVIRONMENT }}
+  PORT: 8080
+  URL_BASE: shrtb.red/
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ SERVICE }}
+  namespace: {{ ENVIRONMENT }}
+stringData:
+  DATABASE_URL: postgres://{{ PSG_USER }}:{{ PSG_PASS }}@{{ PSG_HOST }}:{{ PSG_PORT }}/{{ SERVICE }}_{{ ENVIRONMENT }}
+type: Opaque
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ SERVICE }}
+  namespace: {{ ENVIRONMENT }}
+  annotations:
+    # NOTE: Using an ingress may be overkill since we are doing rolling updates.
+    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:{{ AWS_REGION }}:{{ AWS_ACCOUNT_ID }}:certificate/{{ ACM_ID }}
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "https"
+spec:
+  selector:
+    app: {{ SERVICE }}
+    hash: {{ HASH }}
+  ports:
+    - protocol: https
+      port: 443
+      targetPort: 443
+  type: LoadBalancer
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ SERVICE }}
+  namespace: {{ ENVIRONMENT }}
+  labels:
+    app: {{ SERVICE }}
+    hash: {{ HASH }}
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: {{ SERVICE }}
+      hash: {{ HASH }}
+  template:
+    metadata:
+      labels:
+        app: {{ SERVICE }}
+        hash: {{ HASH }}
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - {{ SERVICE }}
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: {{ SERVICE }}
+        image: {{ DOCKER_REGISTRY }}:{{ HASH }}
+        envFrom:
+          - configMapRef:
+             name: {{ SERVICE }}
+          - secretRef:
+             name: {{ SERVICE }}
+        ports:
+        - containerPort: 80
+        imagePullPolicy: IfNotPresent
+        # Additionally I would set a "readness" and "liveness" probe so
+        # kubernetes can better manage service and signal alerts.
+      - name: {{ SERVICE }}-nginx
+        image: {{ DOCKER_REGISTRY }}-nginx:latest
+        ports:
+        - containerPort: 443
+        imagePullPolicy: IfNotPresent
+      restartPolicy: Always
