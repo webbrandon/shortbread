@@ -42,3 +42,27 @@ This app uses Rspec. To run tests on the Link model, simply type:
 rspec
 ```
 
+Building & Pushing Docker Images
+
+To build a container image and push to AWS ECR:
+(NOTE: It is assumed docker is logged into AWS ECR)
+
+```bash
+git checkout master
+make build
+make test
+make push
+```
+
+Deploying to Kubernetes
+
+Namespaces are governed by branch. Only the master branch can be deployed to production and any other branch will be deployed to development. To deploy app to Kubernetes you can run:
+
+```bash
+make deploy
+```
+
+To run continuous integration on branch run:
+```bash
+make release
+```
