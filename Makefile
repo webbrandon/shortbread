@@ -26,15 +26,15 @@ build: build-app build-nginx
 
 build-app:
   docker build -t $(SERVICE):build \
-		--build-arg RACK_ENV=$(ENVIRONMENT) \
-		-f Dockerfile .
+    --build-arg RACK_ENV=$(ENVIRONMENT) \
+    -f Dockerfile .
 
 build-nginx:
   docker build -t $(SERVICE)-nginx:build \
-		-f Dockerfile.nginx .
+    -f Dockerfile.nginx .
 
 test:
-	docker run -it -rm $(SERVICE):build /bin/bash rspec
+  docker run -it -rm $(SERVICE):build /bin/bash rspec
 
 # To provide site reliability managment to container images
 # push to branch and short hash.  We can also take advantage
@@ -70,8 +70,8 @@ deploy:
 # It would be safer and more consistant to use Infrastructure As Code like
 # Cloudformation/Terraform/Puppet or Ansible but I will break it down using cmds.
 launch-rds:
-	# Create DBMS
-	aws rds create-db-instance \
+  # Create DBMS
+  aws rds create-db-instance \
     --db-instance-identifier psgres \
     --db-instance-class db.t3.micro \
     --engine postgresql \
@@ -82,19 +82,20 @@ launch-rds:
 	# Use this to update R53 record.
 	# NOTE: Polling for the instance would be better than sleep but for simplicity.
 	sleep 120
-	RDS_HOST_ID=$(aws rds describe-db-instances \
+  RDS_HOST_ID=$(aws rds describe-db-instances \
     --db-instance-identifier psgres | jq ..FILTER HOSTZONEID)
-	# Run rake command from build container.
-	docker run -it -rm {{ SERVICE }}:build /bin/bash -c "rake db:migrate"
-	# Grab last dump file and update RDS.
-	curl -o $(PSG_REMOTE_DUMP) > postgresdump.sql
-	psql \
-		-f postgresdump.sql \
-		--host $(RDS_HOST_ID) \
-		--port $(PSG_PORT) \
-		--username $(PSG_USER) \
-		--password $(PSG_PASS) \
-		--dbname $(SERVICE)_$(ENVIRONMENT)
-	echo "{\"Comment\": \"Adding a new DBMS host.\", \"Changes\":[{\"Action\": \"UPSERT\", \"ResourceRecordSet\": { \"Name\": \"$(PSG_HOST).\", \"Type\": \"CNAME\", \"ResourceRecords\": [{\"Value\": \"$(RDS_HOST_ID)\"}]}}]}" > route53change.json
-	aws route53 change-resource-record-sets --hosted-zone-id $(PSG_HOST) --change-batch file://${PWD}/route53change.json
-	rm route53change.json postgresdump.sql
+  # Run rake command from build container.
+  docker run -it -rm -e DATABASE_URL=postgres://$(PSG_USER):$(PSG_PASS)@$(PSG_HOST):$(PSG_PORT)/$(SERVICE)_$(ENVIRONMENT) \
+    $(SERVICE):build /bin/bash -c "rake db:migrate"
+  # Grab last dump file and update RDS.
+  curl -o $(PSG_REMOTE_DUMP) > postgresdump.sql
+  psql \
+    -f postgresdump.sql \
+    --host $(RDS_HOST_ID) \
+    --port $(PSG_PORT) \
+    --username $(PSG_USER) \
+    --password $(PSG_PASS) \
+    --dbname $(SERVICE)_$(ENVIRONMENT)
+  echo "{\"Comment\": \"Adding a new DBMS host.\", \"Changes\":[{\"Action\": \"UPSERT\", \"ResourceRecordSet\": { \"Name\": \"$(PSG_HOST).\", \"Type\": \"CNAME\", \"ResourceRecords\": [{\"Value\": \"$(RDS_HOST_ID)\"}]}}]}" > route53change.json
+  aws route53 change-resource-record-sets --hosted-zone-id $(PSG_HOST) --change-batch file://${PWD}/route53change.json
+  rm route53change.json postgresdump.sql
